@@ -26,6 +26,15 @@
   (test-exp expression?)
   (then-exp expression?)
   (else-exp expression?)]
+  [let-exp
+    (arguments (lambda (x)
+                 (andmap (lambda (y)
+                           (and (pair? y)
+                                (= 2 (length y))
+                                (symbol? (car y))
+                                (expression? (cadr y))))
+                   x)))
+    (bodies (list-of expression?))]
   [app-exp        ; applications
    (rator expression?)
    (rands (list-of expression?))]  
@@ -89,6 +98,11 @@
         [(equal? 'if (1st datum)) (if-exp (parse-exp (2nd datum))
                                           (parse-exp (3rd datum))
                                           (parse-exp (3rd (cdr datum))))]
+        [(equal? 'let (1st datum)) (let-exp (map (lambda (x)
+                                                  (list (parse-exp (1st x))
+                                                   (parse-exp (2nd x))))
+                                              (2nd datum))
+                                     (map parse-exp (cddr datum)))]
         [else (app-exp (parse-exp (1st datum))
           (map parse-exp (cdr datum)))])]
 
@@ -205,6 +219,11 @@
       [if-exp (test-exp then-exp else-exp) (if (eval-exp test-exp)
                                               (eval-exp then-exp)
                                               (eval-exp else-exp))]
+      [let-exp (arguments bodies) (let (map (lambda (x)
+                                              (list (eval-exp (1st x))
+                                                (eval-exp (2nd x))))
+                                         arguments)
+                                    (map eval-exp bodies))]
       [else (eopl:error 'eval-exp "Bad abstract syntax: ~a" exp)])))
 
 ; evaluate the list of operands, putting results into a list
