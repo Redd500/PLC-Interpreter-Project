@@ -1,3 +1,5 @@
+;Author Chi Zhang
+
 ;:  Single-file version of the interpreter.
 ;; Easier to submit to server, probably harder to use in the development process
 
@@ -229,16 +231,63 @@
 (define apply-prim-proc
   (lambda (prim-proc args)
     (case prim-proc
-      [(+) (+ (1st args) (2nd args))]
-      [(-) (- (1st args) (2nd args))]
-      [(*) (* (1st args) (2nd args))]
+       [(cadar) (car (cdr (car (1st args))))]
+      [(+) (apply + args)]
+      [(-) (apply - args)]
+      [(*) (apply * args)]
+      [(/) (apply / args)]
       [(add1) (+ (1st args) 1)]
       [(sub1) (- (1st args) 1)]
-      [(cons) (cons (1st args) (2nd args))]
+      [(zero?) (zero? (1st args))]
+      [(not) (not (1st args))]
       [(=) (= (1st args) (2nd args))]
+      [(<) (< (1st args) (2nd args))]
+      [(>) (> (1st args) (2nd args))]
+      [(<=) (<= (1st args) (2nd args))]
+      [(>=) (>= (1st args) (2nd args))]
+      [(cons) (cons (1st args) (2nd args))]
+      [(car) (car (1st args))]
+      [(cdr) (cdr (1st args))]
+      [(list) (apply list args)]
+      [(null?) (null? (1st args))]
+      [(assq) (assq (1st args) (2nd args))]
+      [(eq?) (apply eq? args)]
+      [(equal?) (apply equal? args)]
+      [(atom?) (atom? (1st args))]
+      [(length) (length (1st args))]
+      [(list->vector) (list->vector (1st args))]
+      [(vector->list) (vector->list (1st args))]
+      [(list?) (apply list? args)]
+      [(pair?) (pair? args)]
+      [(procedure?) (proc-val? (car args))]
+      [(vector->list) (vector->list (1st args))]
+      [(vector) (apply vector args)]
+      [(make-vector) (make-vector (1st args) (2nd args))];later
+      [(vector-ref) (vector-ref (1st args) (2nd args))]
+      [(vector?) (apply vector? args)]
+      [(number?) (number? (1st args))]
+      [(symbol?) (symbol? (1st args))]
+      [(set-car!) (set-car! (1st args) (2nd args))]
+      [(set-cdr!) (set-cdr! (1st args) (2nd args))]
+      [(vector-set!) (vector-set! (1st args) (2nd args) (3rd args))]
+      [(display) (display args)];later
+      [(newline) (newline)];later
+      [(map) (map (lambda (x) (apply-proc (1st args) exp)) (cadr args))]
+      [(caar) (caar (1st args))]
+      [(cadr) (cadr (1st args))]
+      [(cddr) (cddr (1st args))]
+      [(cdar) (cdar (1st args))]
+      [(caddr) (caddr (1st args))]
+      [(cdadr) (cdadr (1st args))]
+      [(cddar) (cddar (1st args))]
+      [(caadr) (caadr (1st args))]
+      [(cdaar) (cdaar (1st args))]
+      [(cadar) (cadar (1st args))]
+      [(caaar) (caaar (1st args))]
+      [(cdddr) (cdddr (1st args))]
       [else (error 'apply-prim-proc 
-            "Bad primitive procedure name: ~s" 
-            prim-proc)])))
+            "Wrong primitive procedure: ~s" 
+            prim-op)])))
 
 (define rep      ; "read-eval-print" loop.
   (lambda ()
