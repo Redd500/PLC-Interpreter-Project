@@ -68,22 +68,14 @@
 (define parse-exp         
   (lambda (datum)
     (cond
-      [(symbol? datum) (var-exp datum)]
-      [(or (number? datum)
-           (boolean? datum)
-           (string? datum)
-           (null? datum)
-           (vector? datum))
-       (lit-exp datum)]
-      [(and (pair? datum)
-            (equal? (1st datum) 'quote))
-       (lit-exp (2nd datum))]
-       [(pair? datum)
-        (cond
+     [(symbol? datum) (var-exp datum)]
+     [(number? datum) (lit-exp datum)]
+     [(pair? datum)
+      (cond
        
-          [else (app-exp (parse-exp (1st datum))
-          		      (map parse-exp (cdr datum)))])]
-       [else (eopl:error 'parse-exp "bad expression: ~s" datum)])))
+       [else (app-exp (parse-exp (1st datum))
+		      (map parse-exp (cdr datum)))])]
+     [else (eopl:error 'parse-exp "bad expression: ~s" datum)])))
 
 
 
