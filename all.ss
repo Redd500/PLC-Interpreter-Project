@@ -17,11 +17,15 @@
   [var-exp        ; variable references
    (id symbol?)]
   [lit-exp        ; "Normal" data.  Did I leave out any types?
-   (datum
+  (datum
     (lambda (x)
       (ormap 
-       (lambda (pred) (pred x))
-       (list number? vector? boolean? symbol? string? pair? null?))))]
+        (lambda (pred) (pred x))
+        (list number? vector? boolean? symbol? string? pair? null?))))]
+  [if-exp
+  (test-exp expression?)
+  (then-exp expression?)
+  (else-exp expression?)]
   [app-exp        ; applications
    (rator expression?)
    (rands (list-of expression?))]  
@@ -79,12 +83,15 @@
        (lit-exp datum)]
       [(and (pair? datum)
             (equal? (1st datum) 'quote))
-       (lit-exp (2nd datum))]
-       [(pair? datum)
-        (cond
-       
-          [else (app-exp (parse-exp (1st datum))
-          		      (map parse-exp (cdr datum)))])]
+      (lit-exp (2nd datum))]
+      [(pair? datum)
+      (cond
+        [(equal? 'if (1st datum)) (if-exp (parse-exp (2nd datum))
+                                          (parse-exp (3rd datum))
+                                          (parse-exp (3rd (cdr datum))))]
+        [else (app-exp (parse-exp (1st datum))
+          (map parse-exp (cdr datum)))])]
+
        [else (eopl:error 'parse-exp "bad expression: ~s" datum)])))
 
 
@@ -192,9 +199,12 @@
 		          "variable not found in environment: ~s"
 			   id)))] 
       [app-exp (rator rands)
-        (let ([proc-value (eval-exp rator)]
-              [args (eval-rands rands)])
-          (apply-proc proc-value args))]
+      (let ([proc-value (eval-exp rator)]
+            [args (eval-rands rands)])
+      (apply-proc proc-value args))]
+      [if-exp (test-exp then-exp else-exp) (if (eval-exp test-exp)
+                                              (eval-exp then-exp)
+                                              (eval-exp else-exp))]
       [else (eopl:error 'eval-exp "Bad abstract syntax: ~a" exp)])))
 
 ; evaluate the list of operands, putting results into a list
