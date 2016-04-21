@@ -27,13 +27,11 @@
   (then-exp expression?)
   (else-exp expression?)]
   [let-exp
-    (arguments (lambda (x)
-                 (andmap (lambda (y)
-                           (and (pair? y)
-                                (= 2 (length y))
-                                (symbol? (car y))
-                                (expression? (cadr y))))
-                   x)))
+    (arguments (list-of (lambda (y)
+                          (and (pair? y)
+                               (= 2 (length y))
+                               (expression? (car y))
+                               (expression? (cadr y))))))
     (bodies (list-of expression?))]
   [app-exp        ; applications
    (rator expression?)
@@ -99,8 +97,8 @@
                                           (parse-exp (3rd datum))
                                           (parse-exp (3rd (cdr datum))))]
         [(equal? 'let (1st datum)) (let-exp (map (lambda (x)
-                                                  (list (parse-exp (1st x))
-                                                   (parse-exp (2nd x))))
+                                                   (list (parse-exp (1st x))
+                                                     (parse-exp (2nd x))))
                                               (2nd datum))
                                      (map parse-exp (cddr datum)))]
         [else (app-exp (parse-exp (1st datum))
@@ -196,41 +194,50 @@
 ; top-level-eval evaluates a form in the global environment
 
 (define top-level-eval
-  (lambda (form)
+  (lambda (form env)
     ; later we may add things that are not expressions.
-    (eval-exp form)))
+    (eval-exp form env)))
 
 ; eval-exp is the main component of the interpreter
 
 (define eval-exp
-  (lambda (exp)
+  (lambda (exp env)
     (cases expression exp
       [lit-exp (datum) datum]
       [var-exp (id)
-				(apply-env init-env id; look up its value.
+				(apply-env env id; look up its value.
       	   (lambda (x) x) ; procedure to call if id is in the environment 
            (lambda () (eopl:error 'apply-env ; procedure to call if id not in env
 		          "variable not found in environment: ~s"
 			   id)))] 
       [app-exp (rator rands)
-      (let ([proc-value (eval-exp rator)]
-            [args (eval-rands rands)])
+      (let ([proc-value (eval-exp rator env)]
+            [args (eval-rands rands env)])
       (apply-proc proc-value args))]
-      [if-exp (test-exp then-exp else-exp) (if (eval-exp test-exp)
-                                              (eval-exp then-exp)
-                                              (eval-exp else-exp))]
-      [let-exp (arguments bodies) (let (map (lambda (x)
-                                              (list (eval-exp (1st x))
-                                                (eval-exp (2nd x))))
-                                         arguments)
-                                    (map eval-exp bodies))]
+      [if-exp (test-exp then-exp else-exp) (if (eval-exp test-exp env)
+                                              (eval-exp then-exp env)
+                                              (eval-exp else-exp env))]
+      [let-exp (arguments bodies) (let ([new-env (extend-env (map 2nd (map 1st arguments))
+                                                   (map (lambda (x) (eval-exp x env)) (map 2nd arguments))
+                                                   env)])
+                                    (letrec ([eval-bodies
+                                               (lambda (body)
+                                                 (cond 
+                                                   [(null? body)
+                                                    (eopl:error 'eval-exp "let expressions need a body: ~s" exp)]
+                                                   [(null? (cdr body))
+                                                    (eval-exp (1st body) new-env)]
+                                                   [else
+                                                     (eval-exp (1st body) new-env)
+                                                     (eval-bodies (cdr body))]))])
+                                      (eval-bodies bodies)))]
       [else (eopl:error 'eval-exp "Bad abstract syntax: ~a" exp)])))
 
 ; evaluate the list of operands, putting results into a list
 
 (define eval-rands
-  (lambda (rands)
-    (map eval-exp rands)))
+  (lambda (rands env)
+    (map (lambda (x) (eval-exp x env)) rands)))
 
 ;  Apply a procedure to its arguments.
 ;  At this point, we only have primitive procedures.  
@@ -328,7 +335,7 @@
       (rep))))  ; tail-recursive, so stack doesn't grow.
 
 (define eval-one-exp
-  (lambda (x) (top-level-eval (parse-exp x))))
+  (lambda (x) (top-level-eval (parse-exp x) init-env)))
 
 
 
