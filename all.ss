@@ -30,12 +30,16 @@
     (arguments (list-of (lambda (y)
                           (and (pair? y)
                                (= 2 (length y))
-                               (expression? (car y))
+                               (symbol? (cadar y))
                                (expression? (cadr y))))))
     (bodies (list-of expression?))]
   [app-exp        ; applications
    (rator expression?)
-   (rands (list-of expression?))]  
+   (rands (list-of expression?))]
+  [lambda-exp
+    (arguments (list-of (lambda (y)
+                          (symbol? (cadr y)))))
+    (bodies (list-of expression?))]
   )
 
 	
@@ -58,7 +62,11 @@
 
 (define-datatype proc-val proc-val?
   [prim-proc
-   (name symbol?)])
+   (name symbol?)]
+  [closure
+    (vars (list-of symbol?))
+    (code (list-of scheme-value?))
+    (env environment?)])
 	 
 	
 
@@ -101,6 +109,9 @@
                                                      (parse-exp (2nd x))))
                                               (2nd datum))
                                      (map parse-exp (cddr datum)))]
+        [(equal? 'lambda (1st datum)) 
+         (lambda-exp (map parse-exp (2nd datum))
+           (map parse-exp (cddr datum)))]
         [else (app-exp (parse-exp (1st datum))
           (map parse-exp (cdr datum)))])]
 
@@ -165,6 +176,7 @@
 
 
 
+
 ;-----------------------+
 ;                       |
 ;   SYNTAX EXPANSION    |
@@ -220,21 +232,27 @@
       [let-exp (arguments bodies) (let ([new-env (extend-env (map 2nd (map 1st arguments))
                                                    (map (lambda (x) (eval-exp x env)) (map 2nd arguments))
                                                    env)])
-                                    (letrec ([eval-bodies
-                                               (lambda (body)
-                                                 (cond 
-                                                   [(null? body)
-                                                    (eopl:error 'eval-exp "let expressions need a body: ~s" exp)]
-                                                   [(null? (cdr body))
-                                                    (eval-exp (1st body) new-env)]
-                                                   [else
-                                                     (eval-exp (1st body) new-env)
-                                                     (eval-bodies (cdr body))]))])
-                                      (eval-bodies bodies)))]
+                                      (eval-bodies bodies new-env))]
+      [lambda-exp (arguments bodies) (closure (map 2nd arguments)
+                                       bodies
+                                       env)]
       [else (eopl:error 'eval-exp "Bad abstract syntax: ~a" exp)])))
 
 ; evaluate the list of operands, putting results into a list
 
+
+
+(define eval-bodies
+  (lambda (body env)
+    (cond 
+      [(null? body)
+       (eopl:error 'eval-exp "let and lambda expressions need a body!")]
+      [(null? (cdr body))
+       (eval-exp (1st body) env)]
+      [else
+        (eval-exp (1st body) env)
+        (eval-bodies (cdr body) env)])))      
+        
 (define eval-rands
   (lambda (rands env)
     (map (lambda (x) (eval-exp x env)) rands)))
@@ -247,7 +265,10 @@
   (lambda (proc-value args)
     (cases proc-val proc-value
       [prim-proc (op) (apply-prim-proc op args)]
-			; You will add other cases
+      [closure (vars code env)
+        (let ([new-env (extend-env vars args env)])
+          (eval-bodies code new-env))]
+     			; You will add other cases
       [else (eopl:error 'apply-proc
                    "Attempt to apply bad procedure: ~s" 
                     proc-value)])))
