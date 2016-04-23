@@ -40,6 +40,16 @@
     (arguments (list-of (lambda (y)
                           (symbol? (cadr y)))))
     (bodies (list-of expression?))]
+  [single-lambda-exp
+    (argument (lambda (x)
+                (symbol? (cadr x))))
+    (bodies (list-of expression?))]
+  [il-lambda-exp ;improper list
+    (arguments (list-of (lambda (x)
+                          (symbol? (cadr x)))))
+    (more-arguments (lambda (x)
+                      (symbol? (cadr x))))
+    (bodies (list-of expression?))]
   )
 
 	
@@ -100,20 +110,38 @@
             (equal? (1st datum) 'quote))
       (lit-exp (2nd datum))]
       [(pair? datum)
-      (cond
-        [(equal? 'if (1st datum)) (if-exp (parse-exp (2nd datum))
-                                          (parse-exp (3rd datum))
-                                          (parse-exp (3rd (cdr datum))))]
-        [(equal? 'let (1st datum)) (let-exp (map (lambda (x)
-                                                   (list (parse-exp (1st x))
-                                                     (parse-exp (2nd x))))
-                                              (2nd datum))
-                                     (map parse-exp (cddr datum)))]
-        [(equal? 'lambda (1st datum)) 
-         (lambda-exp (map parse-exp (2nd datum))
-           (map parse-exp (cddr datum)))]
-        [else (app-exp (parse-exp (1st datum))
-          (map parse-exp (cdr datum)))])]
+       (cond
+         [(equal? 'if (1st datum)) (if-exp (parse-exp (2nd datum))
+                                     (parse-exp (3rd datum))
+                                     (parse-exp (3rd (cdr datum))))]
+         [(equal? 'let (1st datum)) (let-exp (map (lambda (x)
+                                                    (list (parse-exp (1st x))
+                                                      (parse-exp (2nd x))))
+                                               (2nd datum))
+                                      (map parse-exp (cddr datum)))]
+         [(equal? 'lambda (1st datum)) 
+          (cond
+            [(symbol? (2nd datum))
+             (single-lambda-exp (parse-exp (2nd datum))
+               (map parse-exp (cddr datum)))]
+            [(and (not (list? (2nd datum)))
+                  (pair? (2nd datum)))
+             (letrec ((find-vars
+                        (lambda (ls)
+                          (if (pair? (cdr ls))
+                              (list (cons (parse-exp (1st ls))
+                                      (1st (find-vars (cdr ls))))
+                                (2nd (find-vars (cdr ls))))
+                              (list (cons (parse-exp (1st ls)) '()) (parse-exp (cdr ls)))))))
+               (let ([args (find-vars (2nd datum))])
+                 (il-lambda-exp (1st args)
+                   (2nd args)
+                   (map parse-exp (cddr datum)))))]
+            [else
+              (lambda-exp (map parse-exp (2nd datum))
+                (map parse-exp (cddr datum)))])]
+         [else (app-exp (parse-exp (1st datum))
+                 (map parse-exp (cdr datum)))])]
 
        [else (eopl:error 'parse-exp "bad expression: ~s" datum)])))
 
@@ -236,6 +264,17 @@
       [lambda-exp (arguments bodies) (closure (map 2nd arguments)
                                        bodies
                                        env)]
+      [single-lambda-exp (argument bodies)
+        (closure (2nd argument)
+          bodies
+          env)]
+      [il-lambda-exp (arguments more-arguments bodies)
+        (pretty-print more-arguments)
+        (pretty-print arguments)
+        (pretty-print (append arguments (list more-arguments)))
+        (closure (map 2nd (append arguments (list more-arguments)))
+          bodies
+          env)]
       [else (eopl:error 'eval-exp "Bad abstract syntax: ~a" exp)])))
 
 ; evaluate the list of operands, putting results into a list
@@ -273,7 +312,7 @@
                    "Attempt to apply bad procedure: ~s" 
                     proc-value)])))
 
-(define *prim-proc-names* '(+ - * / add1 sub1 zero? not = < > <= >= cons car cdr list null? assq eq? equal? atom? length list->vector list? pair? procedure? vector->list vector make-vector vector-ref vector? number? symbol? set-car! set-cdr! vector-set! display newline caaar caadr caar cadar caddr cadr cdaar cdadr cddar cdddr cddr))
+(define *prim-proc-names* '(+ - * / add1 sub1 zero? not = < > <= >= cons car cdr list null? assq eq? equal? atom? length list->vector list? pair? procedure? vector->list vector make-vector vector-ref vector? number? symbol? set-car! set-cdr! vector-set! display newline caaar caadr caar cadar caddr cadr cdaar cdadr cddar cdddr cddr apply map))
 
 (define init-env         ; for now, our initial global environment only contains 
   (extend-env            ; procedure names.  Recall that an environment associates
@@ -329,7 +368,8 @@
       [(vector-set!) (vector-set! (1st args) (2nd args) (3rd args))]
       [(display) (display args)];later
       [(newline) (newline)];later
-      [(map) (map (lambda (x) (apply-proc (1st args) exp)) (cadr args))]
+      [(map) (map (lambda (x) (apply-proc (1st args) (list x))) (cadr args))]
+      [(apply) (apply (lambda x (apply-proc (1st args) x)) (cadr args))]
       [(caar) (caar (1st args))]
       [(cadr) (cadr (1st args))]
       [(cddr) (cddr (1st args))]
@@ -356,7 +396,7 @@
       (rep))))  ; tail-recursive, so stack doesn't grow.
 
 (define eval-one-exp
-  (lambda (x) (top-level-eval (parse-exp x) init-env)))
+  (lambda (x) (pretty-print x) (top-level-eval (parse-exp x) init-env)))
 
 
 
