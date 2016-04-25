@@ -26,6 +26,9 @@
   (test-exp expression?)
   (then-exp expression?)
   (else-exp expression?)]
+  [one-if-exp
+  (test-exp expression?)
+  (then-exp expression?)]
   [let-exp
     (arguments (list-of (lambda (y)
                           (and (pair? y)
@@ -113,9 +116,13 @@
       (lit-exp (2nd datum))]
       [(pair? datum)
        (cond
-         [(equal? 'if (1st datum)) (if-exp (parse-exp (2nd datum))
+         [(equal? 'if (1st datum))
+         (cond
+         	[(eq? 4 (length datum)) (if-exp (parse-exp (2nd datum))
                                      (parse-exp (3rd datum))
                                      (parse-exp (3rd (cdr datum))))]
+         	[else (one-if-exp (parse-exp (2nd datum))
+         			(parse-exp (3rd datum)))])]
          [(equal? 'let (1st datum)) (let-exp (map (lambda (x)
                                                     (list (parse-exp (1st x))
                                                       (parse-exp (2nd x))))
@@ -260,6 +267,9 @@
       [if-exp (test-exp then-exp else-exp) (if (eval-exp test-exp env)
                                               (eval-exp then-exp env)
                                               (eval-exp else-exp env))]
+      [one-if-exp (test-exp then-exp)
+      (if (eval-exp test-exp env)
+      	(eval-exp then-exp env))]
       [let-exp (arguments bodies) (let ([new-env (extend-env (map 2nd (map 1st arguments))
                                                    (map (lambda (x) (eval-exp x env)) (map 2nd arguments))
                                                    env)])

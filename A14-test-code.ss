@@ -103,6 +103,21 @@
 	     )])
       (display-results correct answers equal?)))
 
+(define (test-one-armed-if)
+    (let ([correct '(
+		     10
+		     )]
+          [answers 
+            (list 
+	     (let ([x (vector 7)])
+	       (if (< 4 5)
+		   (vector-set! x 0 (+ 3 (vector-ref x 0))))
+	       (if (< 4 2)
+		   (vector-set! x 0 (+ 6 (vector-ref x 0))))
+	       (vector-ref x 0))
+	     )])
+      (display-results correct answers equal?)))
+
 (define (test-syntactic-expansion)
     (let ([correct '(
 		     7
