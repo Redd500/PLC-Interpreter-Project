@@ -49,7 +49,8 @@
                           (symbol? (cadr x)))))
     (more-arguments (lambda (x)
                       (symbol? (cadr x))))
-    (bodies (list-of expression?))]
+    (bodies (list-of expression?))
+    (num-of-args number?)]
   )
 
 	
@@ -76,7 +77,8 @@
   [closure
     (vars (list-of symbol?))
     (code (list-of scheme-value?))
-    (env environment?)])
+    (env environment?)
+    (num-of-args number?)])
 	 
 	
 
@@ -136,7 +138,8 @@
                (let ([args (find-vars (2nd datum))])
                  (il-lambda-exp (1st args)
                    (2nd args)
-                   (map parse-exp (cddr datum)))))]
+                   (map parse-exp (cddr datum))
+                   (length (1st args)))))]
             [else
               (lambda-exp (map parse-exp (2nd datum))
                 (map parse-exp (cddr datum)))])]
@@ -263,18 +266,18 @@
                                       (eval-bodies bodies new-env))]
       [lambda-exp (arguments bodies) (closure (map 2nd arguments)
                                        bodies
-                                       env)]
+                                       env
+                                       (length arguments))]
       [single-lambda-exp (argument bodies)
-        (closure (2nd argument)
+        (closure (list (2nd argument))
           bodies
-          env)]
-      [il-lambda-exp (arguments more-arguments bodies)
-        (pretty-print more-arguments)
-        (pretty-print arguments)
-        (pretty-print (append arguments (list more-arguments)))
+          env
+          0)]
+      [il-lambda-exp (arguments more-arguments bodies num-of-args)
         (closure (map 2nd (append arguments (list more-arguments)))
           bodies
-          env)]
+          env
+          num-of-args)]
       [else (eopl:error 'eval-exp "Bad abstract syntax: ~a" exp)])))
 
 ; evaluate the list of operands, putting results into a list
@@ -304,10 +307,17 @@
   (lambda (proc-value args)
     (cases proc-val proc-value
       [prim-proc (op) (apply-prim-proc op args)]
-      [closure (vars code env)
-        (let ([new-env (extend-env vars args env)])
-          (eval-bodies code new-env))]
-     			; You will add other cases
+      [closure (vars code env num-of-args)
+        (letrec ((new-args-creator
+                   (lambda (ls num)
+                     (if (null? ls)
+                         ls
+                         (if (= num 0)
+                             (list ls)
+                             (cons (car ls) (new-args-creator (cdr ls) (- num 1))))))))
+          (let ([new-env (extend-env vars (new-args-creator args num-of-args) env)])
+            (eval-bodies code new-env)))]
+           			; You will add other cases
       [else (eopl:error 'apply-proc
                    "Attempt to apply bad procedure: ~s" 
                     proc-value)])))
