@@ -65,6 +65,9 @@
     (next-case-exp expression?)]
   [begin-exp
     (exps (list-of expression?))]
+  [while-exp
+    (test-exp expression?)
+    (bodies (list-of expression?))]
   )
 
 	
@@ -196,6 +199,9 @@
                                       (parse-exp (cadar exp)))
                              (create-let-exp (cdr exp)))))))
             (create-let-exp (2nd datum)))]
+          [(equal? 'while (1st datum))
+            (while-exp (parse-exp (2nd datum))
+                        (map parse-exp (cddr datum)))]
          [else (app-exp (parse-exp (1st datum))
                  (map parse-exp (cdr datum)))])]
 
@@ -313,7 +319,10 @@
           (map syntax-expand then-exp)
           (syntax-expand next-case-exp))]
       [begin-exp (exps)
-        (begin-exp (map syntax-expand exps))])))
+        (begin-exp (map syntax-expand exps))]
+      [while-exp (test-exp bodies)
+        (while-exp (syntax-expand test-exp)
+          (map syntax-expand bodies))])))
 
 
 
@@ -423,6 +432,12 @@
                          ret
                          (good-map (cdr ls) (eval-exp (car ls) env))))))
           (good-map exps 0))]
+        [while-exp (test-exp bodies)
+        (letrec ([while-loop (lambda ()
+                                (cond
+                                  [(eval-exp test-exp env) (eval-bodies bodies env) (while-loop)]
+                                  [else #f]))])
+          (while-loop))]
       [else (eopl:error 'eval-exp "Bad abstract syntax: ~a" exp)])))
 
 ; evaluate the list of operands, putting results into a list
@@ -467,7 +482,7 @@
                    "Attempt to apply bad procedure: ~s" 
                     proc-value)])))
 
-(define *prim-proc-names* '(+ - * / add1 sub1 zero? not = < > <= >= cons car cdr list null? assq eq? equal? atom? length list->vector list? pair? procedure? vector->list vector make-vector vector-ref vector? number? symbol? set-car! set-cdr! vector-set! display newline caaar caadr caar cadar caddr cadr cdaar cdadr cddar cdddr cddr apply map))
+(define *prim-proc-names* '(quotient + - * / add1 sub1 zero? not = < > <= >= cons car cdr list null? assq eq? equal? atom? length list->vector list? pair? procedure? vector->list vector make-vector vector-ref vector? number? symbol? set-car! set-cdr! vector-set! display newline caaar caadr caar cadar caddr cadr cdaar cdadr cddar cdddr cddr apply map))
 
 (define init-env         ; for now, our initial global environment only contains 
   (extend-env            ; procedure names.  Recall that an environment associates
@@ -537,6 +552,7 @@
       [(cadar) (cadar (1st args))]
       [(caaar) (caaar (1st args))]
       [(cdddr) (cdddr (1st args))]
+      [(quotient) (quotient (1st args) (2nd args))]
       [else (error 'apply-prim-proc 
             "Wrong primitive procedure: ~s" 
             prim-op)])))
