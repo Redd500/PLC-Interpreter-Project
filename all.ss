@@ -1,4 +1,4 @@
-;Author Chi Zhang
+;Author Chi Zhang & Nate Briggs
 
 ;:  Single-file version of the interpreter.
 ;; Easier to submit to server, probably harder to use in the development process
@@ -68,6 +68,19 @@
   [while-exp
     (test-exp expression?)
     (bodies (list-of expression?))]
+  [named-let-exp
+    (name symbol?)
+    (arguments (list-of (lambda (y)
+                          (and (pair? y)
+                               (= 2 (length y))
+                               (symbol? (1st y))
+                               (expression? (2nd y))))))
+    (bodies (list-of expression?))]
+  [letrec-exp
+    (proc-names (list-of symbol?))
+    (idss (list-of (list-of symbol?)))
+    (bodies (list-of expression?))
+    (letrec-body (list-of expression?))]
   )
 
 	
@@ -137,11 +150,21 @@
                                      (parse-exp (3rd (cdr datum))))]
          	[else (one-if-exp (parse-exp (2nd datum))
          			(parse-exp (3rd datum)))])]
-         [(equal? 'let (1st datum)) (let-exp (map (lambda (x)
-                                                    (list (1st x)
-                                                      (parse-exp (2nd x))))
-                                               (2nd datum))
-                                      (map parse-exp (cddr datum)))]
+         [(equal? 'let (1st datum)) 
+          (cond
+            [(list? (2nd datum))
+             (let-exp (map (lambda (x)
+                             (list (1st x)
+                               (parse-exp (2nd x))))
+                        (2nd datum))
+               (map parse-exp (cddr datum)))]
+            [else
+              (named-let-exp (2nd datum)
+                (map (lambda (x)
+                       (list (1st x)
+                         (parse-exp (2nd x))))
+                  (3rd datum))
+                (map parse-exp (cdddr datum)))])]
          [(equal? 'lambda (1st datum)) 
           (cond
             [(symbol? (2nd datum))
@@ -199,6 +222,12 @@
                                       (parse-exp (cadar exp)))
                              (create-let-exp (cdr exp)))))))
             (create-let-exp (2nd datum)))]
+         [(equal? 'letrec (1st datum))
+          (letrec-exp (map 1st (2nd datum))
+            (map 2nd (map 2nd (2nd datum)))
+            (map (lambda (x)
+                  (parse-exp (3rd x))) (map 2nd (2nd datum)))
+            (map parse-exp (cddr datum)))]
           [(equal? 'while (1st datum))
             (while-exp (parse-exp (2nd datum))
                         (map parse-exp (cddr datum)))]
@@ -281,6 +310,12 @@
       [let-exp (arguments bodies)
         (app-exp (lambda-exp (map 1st arguments) bodies)
           (map 2nd arguments))]
+      [letrec-exp (proc-names idss bodies letrec-body)
+        (letrec-exp proc-names idss (map syntax-expand bodies) (map syntax-expand letrec-body))]
+      [named-let-exp (name arguments bodies)
+        (app-exp (lambda-exp (list name) bodies)
+          (app-exp (lambda-exp (map 1st arguments) '())
+            (map 2nd arguments)))]
       [lambda-exp (arguments bodies)
         (lambda-exp arguments (map syntax-expand bodies))]
       [var-exp (id)
@@ -369,10 +404,6 @@
       [one-if-exp (test-exp then-exp)
       (if (eval-exp test-exp env)
       	(eval-exp then-exp env))]
-      [let-exp (arguments bodies) (let ([new-env (extend-env (map 1st arguments)
-                                                   (map (lambda (x) (eval-exp x env)) (map 2nd arguments))
-                                                   env)])
-                                      (eval-bodies bodies new-env))]
       [lambda-exp (arguments bodies) (closure arguments
                                        bodies
                                        env
