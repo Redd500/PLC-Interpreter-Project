@@ -79,8 +79,6 @@
   [letrec-exp
     (proc-names (list-of symbol?))
     (idss (list-of (list-of symbol?)))
-    (more-idss (list-of (lambda (x)
-                          (or (symbol? x) (= 0 x)))))
     (bodies (list-of expression?))
     (letrec-body (list-of expression?))]
   )
@@ -102,8 +100,6 @@
   (recursively-extended-env-record
     (proc-names (list-of symbol?))
     (idss (list-of (list-of symbol?)))
-    (more-idss (list-of (lambda (x)
-                          (or (null? x) (symbol? x)))))
     (bodies (list-of expression?))
     (env environment?)))
 
@@ -232,25 +228,11 @@
                              (create-let-exp (cdr exp)))))))
             (create-let-exp (2nd datum)))]
          [(equal? 'letrec (1st datum))
-          (letrec ((find-vars
-                     (lambda (ls)
-                       (if (null? ls)
-                           (list '() '())
-                           (if (pair? (cdr ls))
-                               (list (cons (1st ls)
-                                       (1st (find-vars (cdr ls))))
-                                 (2nd (find-vars (cdr ls))))
-                               (if (null? (cdr ls))
-                                   (list '() 0)
-                                   (list (cons (1st ls) '()) (cdr ls))))))))
-            (let ([args (map find-vars (map 2nd (map 2nd (2nd datum))))])
-              (pretty-print args)
-              (letrec-exp (map 1st (2nd datum))
-                (map 1st args)
-                (map 2nd args)
-                (map (lambda (x)
-                       (parse-exp (3rd x))) (map 2nd (2nd datum)))
-                (map parse-exp (cddr datum)))))]
+          (letrec-exp (map 1st (2nd datum))
+            (map 2nd (map 2nd (2nd datum)))
+            (map (lambda (x)
+                   (parse-exp (3rd x))) (map 2nd (2nd datum)))
+            (map parse-exp (cddr datum)))]
           [(equal? 'while (1st datum))
             (while-exp (parse-exp (2nd datum))
                         (map parse-exp (cddr datum)))]
@@ -287,9 +269,9 @@
     (extended-env-record syms vals env)))
 
 (define extend-env-recursively
-  (lambda (proc-names idss more-idss bodies old-env)
+  (lambda (proc-names idss bodies old-env)
     (recursively-extended-env-record
-      proc-names idss more-idss bodies old-env)))
+      proc-names idss bodies old-env)))
 
 (define list-find-position
   (lambda (sym los)
@@ -316,12 +298,10 @@
 	      (succeed (list-ref vals pos))
 	      (apply-env env sym succeed fail))))
       (recursively-extended-env-record
-        (proc-names idss more-idss bodies old-env)
+        (proc-names idss bodies old-env)
         (let ([pos (list-find-position sym proc-names)])
-          (pretty-print idss)
-          (pretty-print more-idss)
           (if (number? pos)
-              (closure (list-ref (map append idss more-idss) pos)
+              (closure (list-ref idss pos)
                 (list (list-ref bodies pos))
                 env
                 (+ 1 (length idss)))
@@ -349,10 +329,10 @@
       [let-exp (arguments bodies)
         (app-exp (lambda-exp (map 1st arguments) (map syntax-expand bodies))
           (map 2nd arguments))]
-      [letrec-exp (proc-names idss more-idss bodies letrec-body)
-        (letrec-exp proc-names idss more-idss (map syntax-expand bodies) (map syntax-expand letrec-body))]
+      [letrec-exp (proc-names idss bodies letrec-body)
+        (letrec-exp proc-names idss (map syntax-expand bodies) (map syntax-expand letrec-body))]
       [named-let-exp (name arguments bodies)
-        (syntax-expand (letrec-exp (list name) (list (map 1st arguments)) '((())) bodies (list (app-exp (var-exp name) (map 2nd arguments)))))]
+        (syntax-expand (letrec-exp (list name) (list (map 1st arguments)) bodies (list (app-exp (var-exp name) (map 2nd arguments)))))]
       [lambda-exp (arguments bodies)
         (lambda-exp arguments (map syntax-expand bodies))]
       [var-exp (id)
@@ -506,8 +486,8 @@
                                   [(eval-exp test-exp env) (eval-bodies bodies env) (while-loop)]
                                   [else #f]))])
           (while-loop))]
-      [letrec-exp (proc-names idss more-idss bodies letrec-body)
-        (eval-bodies letrec-body (extend-env-recursively proc-names idss more-idss bodies env))]
+      [letrec-exp (proc-names idss bodies letrec-body)
+        (eval-bodies letrec-body (extend-env-recursively proc-names idss bodies env))]
       [else (eopl:error 'eval-exp "Bad abstract syntax: ~a" exp)])))
 
 ; evaluate the list of operands, putting results into a list

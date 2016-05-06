@@ -79,7 +79,8 @@
   [letrec-exp
     (proc-names (list-of symbol?))
     (idss (list-of (list-of symbol?)))
-    (more-idss (list-of symbol?))
+    (more-idss (list-of (lambda (x)
+                          (or (symbol? x) (= 0 x)))))
     (bodies (list-of expression?))
     (letrec-body (list-of expression?))]
   )
@@ -101,6 +102,8 @@
   (recursively-extended-env-record
     (proc-names (list-of symbol?))
     (idss (list-of (list-of symbol?)))
+    (more-idss (list-of (lambda (x)
+                          (or (null? x) (symbol? x)))))
     (bodies (list-of expression?))
     (env environment?)))
 
@@ -237,8 +240,11 @@
                                (list (cons (1st ls)
                                        (1st (find-vars (cdr ls))))
                                  (2nd (find-vars (cdr ls))))
-                               (list (cons (1st ls) '()) (cdr ls)))))))
+                               (if (null? (cdr ls))
+                                   (list '() 0)
+                                   (list (cons (1st ls) '()) (cdr ls))))))))
             (let ([args (map find-vars (map 2nd (map 2nd (2nd datum))))])
+              (pretty-print args)
               (letrec-exp (map 1st (2nd datum))
                 (map 1st args)
                 (map 2nd args)
@@ -312,8 +318,10 @@
       (recursively-extended-env-record
         (proc-names idss more-idss bodies old-env)
         (let ([pos (list-find-position sym proc-names)])
+          (pretty-print idss)
+          (pretty-print more-idss)
           (if (number? pos)
-              (closure (list-ref idss pos)
+              (closure (list-ref (map append idss more-idss) pos)
                 (list (list-ref bodies pos))
                 env
                 (+ 1 (length idss)))
@@ -344,7 +352,7 @@
       [letrec-exp (proc-names idss more-idss bodies letrec-body)
         (letrec-exp proc-names idss more-idss (map syntax-expand bodies) (map syntax-expand letrec-body))]
       [named-let-exp (name arguments bodies)
-        (syntax-expand (letrec-exp (list name) (list (map 1st arguments)) '() bodies (list (app-exp (var-exp name) (map 2nd arguments)))))]
+        (syntax-expand (letrec-exp (list name) (list (map 1st arguments)) '((())) bodies (list (app-exp (var-exp name) (map 2nd arguments)))))]
       [lambda-exp (arguments bodies)
         (lambda-exp arguments (map syntax-expand bodies))]
       [var-exp (id)
