@@ -79,6 +79,8 @@
   [letrec-exp
     (proc-names (list-of symbol?))
     (idss (list-of (list-of symbol?)))
+    (more-idss (list-of (lambda (x)
+                          (or (symbol? x) (= 0 x)))))
     (bodies (list-of expression?))
     (letrec-body (list-of expression?))]
   )
@@ -96,7 +98,14 @@
   (extended-env-record
    (syms (list-of symbol?))
    (vals (list-of scheme-value?))
-   (env environment?)))
+   (env environment?))
+  (recursively-extended-env-record
+    (proc-names (list-of symbol?))
+    (idss (list-of (list-of symbol?)))
+    (more-idss (list-of (lambda (x)
+                          (or (null? x) (symbol? x)))))
+    (bodies (list-of expression?))
+    (env environment?)))
 
 ; datatype for procedures.  At first there is only one
 ; kind of procedure, but more kinds will be added later.
@@ -223,11 +232,25 @@
                              (create-let-exp (cdr exp)))))))
             (create-let-exp (2nd datum)))]
          [(equal? 'letrec (1st datum))
-          (letrec-exp (map 1st (2nd datum))
-            (map 2nd (map 2nd (2nd datum)))
-            (map (lambda (x)
-                  (parse-exp (3rd x))) (map 2nd (2nd datum)))
-            (map parse-exp (cddr datum)))]
+          (letrec ((find-vars
+                     (lambda (ls)
+                       (if (null? ls)
+                           (list '() '())
+                           (if (pair? (cdr ls))
+                               (list (cons (1st ls)
+                                       (1st (find-vars (cdr ls))))
+                                 (2nd (find-vars (cdr ls))))
+                               (if (null? (cdr ls))
+                                   (list '() 0)
+                                   (list (cons (1st ls) '()) (cdr ls))))))))
+            (let ([args (map find-vars (map 2nd (map 2nd (2nd datum))))])
+              (pretty-print args)
+              (letrec-exp (map 1st (2nd datum))
+                (map 1st args)
+                (map 2nd args)
+                (map (lambda (x)
+                       (parse-exp (3rd x))) (map 2nd (2nd datum)))
+                (map parse-exp (cddr datum)))))]
           [(equal? 'while (1st datum))
             (while-exp (parse-exp (2nd datum))
                         (map parse-exp (cddr datum)))]
@@ -263,6 +286,11 @@
   (lambda (syms vals env)
     (extended-env-record syms vals env)))
 
+(define extend-env-recursively
+  (lambda (proc-names idss more-idss bodies old-env)
+    (recursively-extended-env-record
+      proc-names idss more-idss bodies old-env)))
+
 (define list-find-position
   (lambda (sym los)
     (list-index (lambda (xsym) (eqv? sym xsym)) los)))
@@ -286,7 +314,18 @@
 	(let ((pos (list-find-position sym syms)))
       	  (if (number? pos)
 	      (succeed (list-ref vals pos))
-	      (apply-env env sym succeed fail)))))))
+	      (apply-env env sym succeed fail))))
+      (recursively-extended-env-record
+        (proc-names idss more-idss bodies old-env)
+        (let ([pos (list-find-position sym proc-names)])
+          (pretty-print idss)
+          (pretty-print more-idss)
+          (if (number? pos)
+              (closure (list-ref (map append idss more-idss) pos)
+                (list (list-ref bodies pos))
+                env
+                (+ 1 (length idss)))
+              (apply-env old-env sym succeed fail)))))))
 
 
 
@@ -308,14 +347,12 @@
   (lambda (exp)
     (cases expression exp
       [let-exp (arguments bodies)
-        (app-exp (lambda-exp (map 1st arguments) bodies)
+        (app-exp (lambda-exp (map 1st arguments) (map syntax-expand bodies))
           (map 2nd arguments))]
-      [letrec-exp (proc-names idss bodies letrec-body)
-        (letrec-exp proc-names idss (map syntax-expand bodies) (map syntax-expand letrec-body))]
+      [letrec-exp (proc-names idss more-idss bodies letrec-body)
+        (letrec-exp proc-names idss more-idss (map syntax-expand bodies) (map syntax-expand letrec-body))]
       [named-let-exp (name arguments bodies)
-        (app-exp (lambda-exp (list name) bodies)
-          (app-exp (lambda-exp (map 1st arguments) '())
-            (map 2nd arguments)))]
+        (syntax-expand (letrec-exp (list name) (list (map 1st arguments)) '((())) bodies (list (app-exp (var-exp name) (map 2nd arguments)))))]
       [lambda-exp (arguments bodies)
         (lambda-exp arguments (map syntax-expand bodies))]
       [var-exp (id)
@@ -469,6 +506,8 @@
                                   [(eval-exp test-exp env) (eval-bodies bodies env) (while-loop)]
                                   [else #f]))])
           (while-loop))]
+      [letrec-exp (proc-names idss more-idss bodies letrec-body)
+        (eval-bodies letrec-body (extend-env-recursively proc-names idss more-idss bodies env))]
       [else (eopl:error 'eval-exp "Bad abstract syntax: ~a" exp)])))
 
 ; evaluate the list of operands, putting results into a list
@@ -513,7 +552,7 @@
                    "Attempt to apply bad procedure: ~s" 
                     proc-value)])))
 
-(define *prim-proc-names* '(quotient + - * / add1 sub1 zero? not = < > <= >= cons car cdr list null? assq eq? equal? atom? length list->vector list? pair? procedure? vector->list vector make-vector vector-ref vector? number? symbol? set-car! set-cdr! vector-set! display newline caaar caadr caar cadar caddr cadr cdaar cdadr cddar cdddr cddr apply map))
+(define *prim-proc-names* '(eqv? append list-tail quotient + - * / add1 sub1 zero? not = < > <= >= cons car cdr list null? assq eq? equal? atom? length list->vector list? pair? procedure? vector->list vector make-vector vector-ref vector? number? symbol? set-car! set-cdr! vector-set! display newline caaar caadr caar cadar caddr cadr cdaar cdadr cddar cdddr cddr apply map))
 
 (define init-env         ; for now, our initial global environment only contains 
   (extend-env            ; procedure names.  Recall that an environment associates
@@ -584,6 +623,9 @@
       [(caaar) (caaar (1st args))]
       [(cdddr) (cdddr (1st args))]
       [(quotient) (quotient (1st args) (2nd args))]
+      [(list-tail) (list-tail (1st args) (2nd args))]
+      [(append) (append (1st args) (2nd args))]
+      [(eqv?) (eqv? (1st args) (2nd args))]
       [else (error 'apply-prim-proc 
             "Wrong primitive procedure: ~s" 
             prim-op)])))
