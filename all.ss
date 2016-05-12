@@ -81,7 +81,12 @@
     (idss (list-of (list-of symbol?)))
     (bodies (list-of expression?))
     (letrec-body (list-of expression?))]
-  )
+  [set!-exp
+    (var symbol?)
+    (value expression?)]
+  [define-exp
+    (var symbol?)
+    (value expression?)])
 
 	
 	
@@ -95,7 +100,7 @@
   (empty-env-record)
   (extended-env-record
    (syms (list-of symbol?))
-   (vals (list-of scheme-value?))
+   (vals (list-of box?))
    (env environment?))
   (recursively-extended-env-record
     (proc-names (list-of symbol?))
@@ -236,6 +241,12 @@
           [(equal? 'while (1st datum))
             (while-exp (parse-exp (2nd datum))
                         (map parse-exp (cddr datum)))]
+          [(equal? 'set! (1st datum))
+            (set!-exp (2nd datum)
+                      (parse-exp (3rd datum)))]
+          [(equal? 'define (1st datum))
+            (define-exp (2nd datum)
+                        (parse-exp (3rd datum)))]
          [else (app-exp (parse-exp (1st datum))
                  (map parse-exp (cdr datum)))])]
 
@@ -266,7 +277,7 @@
 
 (define extend-env
   (lambda (syms vals env)
-    (extended-env-record syms vals env)))
+    (extended-env-record syms (map box vals) env)))
 
 (define extend-env-recursively
   (lambda (proc-names idss bodies old-env)
@@ -289,27 +300,48 @@
 
 (define apply-env
   (lambda (env sym succeed fail) ; succeed and fail are procedures applied if the var is or isn't found, respectively.
-    (cases environment env
-      (empty-env-record ()
-        (fail))
-      (extended-env-record (syms vals env)
-	(let ((pos (list-find-position sym syms)))
-      	  (if (number? pos)
-	      (succeed (list-ref vals pos))
-	      (apply-env env sym succeed fail))))
-      (recursively-extended-env-record
-        (proc-names idss bodies old-env)
-        (let ([pos (list-find-position sym proc-names)])
-          (if (number? pos)
-              (closure (list-ref idss pos)
-                (list (list-ref bodies pos))
-                env
-                (+ 1 (length idss)))
-              (apply-env old-env sym succeed fail)))))))
+    (deref (apply-env-ref env sym succeed fail))))
 
+(define apply-env-ref
+  (lambda (env var succeed fail)
+    (if (equal? global-env env)
+      (cases environment env
+        (extended-env-record (syms vals env)
+          (let ((pos (list-find-position var syms)))
+            (if (number? pos)
+              (succeed (list-ref vals pos))
+              (fail))))
+        (else
+          (eopl:error 'apply-env-ref "you should not see this message!")))
+      (cases environment env
+        (empty-env-record ()
+         (apply-env-ref global-env var succeed fail))
+        (extended-env-record (syms vals env)
+          (let ((pos (list-find-position var syms)))
+            (if (number? pos)
+              (succeed (list-ref vals pos))
+              (apply-env-ref env var succeed fail))))
+        (recursively-extended-env-record
+          (proc-names idss bodies old-env)
+          (let ([pos (list-find-position var proc-names)])
+            (if (number? pos)
+                (closure (list-ref idss pos)
+                  (list (list-ref bodies pos))
+                  env
+                  (+ 1 (length idss)))
+                (apply-env-ref old-env var succeed fail))))))))
 
+(define deref
+  (lambda (ref)
+    (if (box? ref)
+     (unbox ref)
+     ref)))
 
-
+(define set!-ref
+  (lambda (ref value)
+    (if (box? ref)
+      (set-box! ref value)
+      (eopl:error 'set!-ref "ref is not a box: ~a" ref))))
 
 
 
@@ -374,7 +406,11 @@
         (begin-exp (map syntax-expand exps))]
       [while-exp (test-exp bodies)
         (while-exp (syntax-expand test-exp)
-          (map syntax-expand bodies))])))
+          (map syntax-expand bodies))]
+      [set!-exp (var value)
+        (set!-exp var (syntax-expand value))]
+      [define-exp (var value)
+        (define-exp var (syntax-expand value))])))
 
 
 
@@ -396,7 +432,6 @@
 
 (define top-level-eval
   (lambda (form env)
-    ; later we may add things that are not expressions.
     (eval-exp form env)))
 
 ; eval-exp is the main component of the interpreter
@@ -409,8 +444,7 @@
 				(apply-env env id; look up its value.
       	   (lambda (x) x) ; procedure to call if id is in the environment 
            (lambda () (eopl:error 'apply-env ; procedure to call if id not in env
-		          "variable not found in environment: ~s"
-			   id)))] 
+		          "variable not found in environment: ~s" id)))] 
       [app-exp (rator rands)
       (let ([proc-value (eval-exp rator env)]
             [args (eval-rands rands env)])
@@ -480,7 +514,7 @@
                          ret
                          (good-map (cdr ls) (eval-exp (car ls) env))))))
           (good-map exps 0))]
-        [while-exp (test-exp bodies)
+      [while-exp (test-exp bodies)
         (letrec ([while-loop (lambda ()
                                 (cond
                                   [(eval-exp test-exp env) (eval-bodies bodies env) (while-loop)]
@@ -488,6 +522,16 @@
           (while-loop))]
       [letrec-exp (proc-names idss bodies letrec-body)
         (eval-bodies letrec-body (extend-env-recursively proc-names idss bodies env))]
+      [set!-exp (var value)
+        (set!-ref
+          (apply-env-ref env var (lambda (x) x) (lambda () (eopl:error 'set! "You shouldn't see this: ~a" exp)))
+          (eval-exp value env))]
+      [define-exp (var value)
+        (apply-env-ref global-env var (lambda (x) (set!-ref x (eval-exp value global-env)))
+                                      (lambda () (set! global-env (extend-env
+                                                  (cons var (2nd global-env))
+                                                  (cons (eval-exp value global-env) (map deref (3rd global-env)))
+                                                  (empty-env)))))]
       [else (eopl:error 'eval-exp "Bad abstract syntax: ~a" exp)])))
 
 ; evaluate the list of operands, putting results into a list
@@ -540,6 +584,23 @@
      (map prim-proc      
           *prim-proc-names*)
      (empty-env)))
+
+(define global-env
+  (extend-env            
+     *prim-proc-names*   
+     (map prim-proc      
+          *prim-proc-names*)
+     (empty-env)))
+
+
+(define reset-global-env
+  (lambda ()
+    (set! global-env (extend-env            
+     *prim-proc-names*   
+     (map prim-proc      
+          *prim-proc-names*)
+     (empty-env)))))
+
 
 ; Usually an interpreter must define each 
 ; built-in procedure individually.  We are "cheating" a little bit.
@@ -620,7 +681,9 @@
       (rep))))  ; tail-recursive, so stack doesn't grow.
 
 (define eval-one-exp
-  (lambda (x) (top-level-eval (syntax-expand (parse-exp x)) init-env)))
+  (lambda (x)
+    (top-level-eval
+      (syntax-expand (parse-exp x)) init-env)))
 
 
 
