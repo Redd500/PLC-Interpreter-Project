@@ -11,6 +11,54 @@
 ;                   |
 ;-------------------+
 
+;define continuations
+(define-datatype continuation continuation?
+	[get-self-k]
+	[test-k
+		(then-exp expression?)
+		(else-exp expression?)
+		(env environment?)
+		(k continuation?)]
+	[one-test-k
+		(then-exp expression?)
+		(env environment?)
+		(k continuation?)]
+	[rator-k
+		(rands (list-of expression?))
+		(env environment?)
+		(k continuation?)]
+	[rands-k
+		(proc-value scheme-value?)
+		(k continuation?)]
+	[cond-k
+		(then-exp (list-of expression?))
+		(next-cond-exp expression?)
+		(env environment?)
+		(k continuation?)])
+
+(define apply-k
+	(lambda (k val)
+		(cases continuation k
+			[get-self-k ()
+				val]
+			[test-k (then-exp else-exp env k)
+				(if val
+					(eval-exp then-exp env k)
+					(eval-exp else-exp env k))]
+			[one-test-k (then-exp env k)
+				(if val
+					(eval-exp then-exp env k))]
+			[cond-k (then-exp next-cond-exp env k)
+				(if val
+					(eval-bodies then-exp env k)
+					(eval-exp next-cond-exp env k))]
+			[rator-k (rands env k)
+				(eval-rands rands env (rands-k val k))]
+			[rands-k (proc-value k)
+				(apply-proc proc-value val k)]
+			[else
+				(apply k val)])))
+
 ; parsed expression
 
 (define-datatype expression expression?  
@@ -445,45 +493,47 @@
 
 (define top-level-eval
   (lambda (form env)
-    (eval-exp form env)))
+    (eval-exp form env (get-self-k))))
 
 ; eval-exp is the main component of the interpreter
 
 (define eval-exp
-  (lambda (exp env)
+  (lambda (exp env k)
     (cases expression exp
-      [lit-exp (datum) datum]
+      [lit-exp (datum) (apply-k k datum)]
       [var-exp (id)
 				(apply-env env id; look up its value.
-      	   (lambda (x) x) ; procedure to call if id is in the environment 
+      	   k ; procedure to call if id is in the environment 
            (lambda () (eopl:error 'apply-env ; procedure to call if id not in env
 		          "variable not found in environment: ~s" id)))] 
       [app-exp (rator rands)
-      (let ([proc-value (eval-exp rator env)]
-             [args (eval-rands rands env)])
-      (apply-proc proc-value args))]
-      [if-exp (test-exp then-exp else-exp) (if (eval-exp test-exp env)
-                                              (eval-exp then-exp env)
-                                              (eval-exp else-exp env))]
+      				(eval-exp rator
+      									env
+      									(rator-k rands env k))]
+      [if-exp (test-exp then-exp else-exp) (eval-exp test-exp
+      																							env
+      																							(test-k then-exp else-exp env k))]
       [one-if-exp (test-exp then-exp)
-      (if (eval-exp test-exp env)
-      	(eval-exp then-exp env))]
-      [lambda-exp (arguments bodies) (closure arguments
+      (eval-exp test-exp env
+      	(one-test-k then-exp env k))]
+      [lambda-exp (arguments bodies) (apply-k k (closure arguments
                                        bodies
                                        env
-                                       (length arguments))]
+                                       (length arguments)))]
       [single-lambda-exp (argument bodies)
-        (closure (list argument)
+        (apply-k k (closure (list argument)
           bodies
           env
-          0)]
+          0))]
       [il-lambda-exp (arguments more-arguments bodies num-of-args)
-        (closure (append arguments (list more-arguments))
+        (apply-k k (closure (append arguments (list more-arguments))
           bodies
           env
-          num-of-args)]
+          num-of-args))]
+        ;;;;;
       [cond-exp (test-exp then-exp next-cond-exp)
-        (if (eval-exp test-exp env)
+        (eval-exp test-exp env
+        	(cond-k )
             (let ((evals (map (lambda (x)
                                 (eval-exp x env)) then-exp)))
               (list-ref evals (- (length evals) 1)))
@@ -551,28 +601,30 @@
 
 
 (define eval-bodies
-  (lambda (body env)
+  (lambda (body env k)
     (cond 
       [(null? body)
        (eopl:error 'eval-exp "let and lambda expressions need a body!")]
       [(null? (cdr body))
-       (eval-exp (1st body) env)]
+       (eval-exp (1st body) env k)]
       [else
-        (eval-exp (1st body) env)
-        (eval-bodies (cdr body) env)])))      
+        (eval-exp (1st body) env k)
+        (eval-bodies (cdr body) env k)])))      
         
 (define eval-rands
-  (lambda (rands env)
-    (map (lambda (x) (eval-exp x env)) rands)))
+  (lambda (rands env k)
+    (map-cps (lambda (x) (eval-exp x env (get-self-k))) rands k)))
+;checkloatsdaskhflashfkj
 
 ;  Apply a procedure to its arguments.
 ;  At this point, we only have primitive procedures.  
 ;  User-defined procedures will be added later.
 
 (define apply-proc
-  (lambda (proc-value args)
+	;add a k here
+  (lambda (proc-value args k)
     (cases proc-val proc-value
-      [prim-proc (op) (apply-prim-proc op args)]
+      [prim-proc (op) (apply-prim-proc op args k)]
       [closure (vars code env num-of-args)
         (letrec ((new-args-creator
                    (lambda (ls num)
@@ -618,7 +670,7 @@
 ; built-in procedure individually.  We are "cheating" a little bit.
 
 (define apply-prim-proc
-  (lambda (prim-proc args)
+  (lambda (prim-proc args k)
     (case prim-proc
        [(cadar) (car (cdr (car (1st args))))]
       [(+) (apply + args)]
@@ -659,9 +711,10 @@
       [(set-car!) (set-car! (1st args) (2nd args))]
       [(set-cdr!) (set-cdr! (1st args) (2nd args))]
       [(vector-set!) (vector-set! (1st args) (2nd args) (3rd args))]
-      [(display) (display args)];later
+      [(display) (display (1st args))];later
       [(newline) (newline)];later
-      [(map) (map (lambda (x) (apply-proc (1st args) (list x))) (cadr args))]
+      [(printf) (apply printf args)]
+      [(map) (map-cps (lambda (x) (apply-proc (1st args) (list x))) (cadr args) k)]
       [(apply) (apply (lambda x (apply-proc (1st args) x)) (cadr args))]
       [(caar) (caar (1st args))]
       [(cadr) (cadr (1st args))]
@@ -682,6 +735,13 @@
       [else (error 'apply-prim-proc 
             "Wrong primitive procedure: ~s" 
             prim-op)])))
+
+(define (map-cps proc-cps L k)
+	(if (null? L)
+		(apply-k k '())
+		(proc-cps (car L) (lambda (x)
+			(map-cps proc-cps (cdr L) (lambda (y)
+				(apply-k k (cons x y))))))))
 
 (define rep      ; "read-eval-print" loop.
   (lambda ()
