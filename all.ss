@@ -26,10 +26,11 @@
 	[rator-k
 		(rands (list-of expression?))
 		(env environment?)
-		(k continuation?)]
+		(k (lambda (x)
+                   (or (continuation? x) (procedure? x))))]
 	[rands-k
 		(proc-value scheme-value?)
-		(k continuation?)]
+		(k (lambda (x) (or (continuation? x) (procedure? x))))]
 	[cond-k
 		(then-exp (list-of expression?))
 		(next-cond-exp expression?)
@@ -38,26 +39,26 @@
 
 (define apply-k
 	(lambda (k val)
-		(cases continuation k
-			[get-self-k ()
-				val]
-			[test-k (then-exp else-exp env k)
-				(if val
-					(eval-exp then-exp env k)
-					(eval-exp else-exp env k))]
-			[one-test-k (then-exp env k)
-				(if val
-					(eval-exp then-exp env k))]
-			[cond-k (then-exp next-cond-exp env k)
-				(if val
-					(eval-bodies then-exp env k)
-					(eval-exp next-cond-exp env k))]
-			[rator-k (rands env k)
-				(eval-rands rands env (rands-k val k))]
-			[rands-k (proc-value k)
-				(apply-proc proc-value val k)]
-			[else
-				(apply k val)])))
+   (if (continuation? k)
+       (cases continuation k
+         [get-self-k ()
+           val]
+         [test-k (then-exp else-exp env k)
+           (if val
+               (eval-exp then-exp env k)
+               (eval-exp else-exp env k))]
+         [one-test-k (then-exp env k)
+           (if val
+               (eval-exp then-exp env k))]
+         [cond-k (then-exp next-cond-exp env k)
+           (if val
+               (eval-bodies then-exp env k)
+               (eval-exp next-cond-exp env k))]
+         [rator-k (rands env k)
+           (eval-rands rands env (rands-k (deref val) k))]
+         [rands-k (proc-value k)
+           (apply-proc proc-value val k)])
+       (k val))))
 
 ; parsed expression
 
@@ -370,7 +371,7 @@
         (extended-env-record (syms vals env)
           (let ((pos (list-find-position var syms)))
             (if (number? pos)
-              (succeed (list-ref vals pos))
+              (apply-k succeed (list-ref vals pos))
               (fail))))
         (else
           (eopl:error 'apply-env-ref "you should not see this message!")))
@@ -380,7 +381,7 @@
         (extended-env-record (syms vals env)
           (let ((pos (list-find-position var (map deref syms))))
             (if (number? pos)
-                (succeed (list-ref vals pos))
+                (apply-k succeed (list-ref vals pos))
                 (apply-env-ref env var succeed fail))))
         (recursively-extended-env-record
           (proc-names idss bodies old-env)
@@ -499,20 +500,22 @@
 
 (define eval-exp
   (lambda (exp env k)
+    (pretty-print exp)
+    (pretty-print k)
     (cases expression exp
       [lit-exp (datum) (apply-k k datum)]
       [var-exp (id)
-				(apply-env env id; look up its value.
+        (apply-env env id; look up its value.
       	   k ; procedure to call if id is in the environment 
-           (lambda () (eopl:error 'apply-env ; procedure to call if id not in env
-		          "variable not found in environment: ~s" id)))] 
+          (lambda () (eopl:error 'apply-env ; procedure to call if id not in env
+           		          "variable not found in environment: ~s" id)))] 
       [app-exp (rator rands)
-      				(eval-exp rator
-      									env
-      									(rator-k rands env k))]
+        (eval-exp rator
+          env
+          (rator-k rands env k))]
       [if-exp (test-exp then-exp else-exp) (eval-exp test-exp
-      																							env
-      																							(test-k then-exp else-exp env k))]
+                                             env
+                                             (test-k then-exp else-exp env k))]
       [one-if-exp (test-exp then-exp)
       (eval-exp test-exp env
       	(one-test-k then-exp env k))]
@@ -532,12 +535,11 @@
           num-of-args))]
         ;;;;;
       [cond-exp (test-exp then-exp next-cond-exp)
-        (eval-exp test-exp env
-        	(cond-k )
-            (let ((evals (map (lambda (x)
-                                (eval-exp x env)) then-exp)))
+        (if (eval-exp test-exp env k)
+            (let ((evals (map-cps (lambda (x)
+                                    (eval-exp x env (get-self-k))) then-exp k)))
               (list-ref evals (- (length evals) 1)))
-            (eval-exp next-cond-exp env))]
+            (eval-exp next-cond-exp env k))]
       [and-exp (exps)
         (letrec ((eval-and
                    (lambda (ls)
@@ -548,51 +550,51 @@
                          (if (car ls)
                              (eval-and (cdr ls))
                              #f)))))
-          (eval-and (map (lambda (x)
-                           (eval-exp x env)) exps)))]
+          (eval-and (map-cps (lambda (x)
+                               (eval-exp x env (get-self-k))) exps k)))]
       [or-exp (exps)
         (letrec ((eval-or
                    (lambda (ls)
                      (if (null? ls)
                          #f
-                         (let ([ans (eval-exp (car ls) env)])
+                         (let ([ans (eval-exp (car ls) env k)])
                            (if ans
                                ans
                                (eval-or (cdr ls))))))))
           (eval-or exps))]
       [case-exp (test-exp ans-exp then-exp next-case-exp)
-        (if (member (eval-exp test-exp env) (map (lambda (x)
-                                                   (eval-exp x env)) ans-exp))
+        (if (member (eval-exp test-exp env k) (map-cps (lambda (x)
+                                                         (eval-exp x env (get-self-k))) ans-exp k))
             (letrec ((good-map
                        (lambda (ls ret)
                          (if (null? ls)
                              ret
-                             (good-map (cdr ls) (eval-exp (car ls) env))))))
+                             (good-map (cdr ls) (eval-exp (car ls) env k))))))
               (good-map then-exp 0))
-            (eval-exp next-case-exp env))]
+            (eval-exp next-case-exp env k))]
       [begin-exp (exps)
         (letrec ((good-map
                    (lambda (ls ret)
                      (if (null? ls)
                          ret
-                         (good-map (cdr ls) (eval-exp (car ls) env))))))
+                         (good-map (cdr ls) (eval-exp (car ls) env k))))))
           (good-map exps 0))]
       [while-exp (test-exp bodies)
         (letrec ([while-loop (lambda ()
                                 (cond
-                                  [(eval-exp test-exp env) (eval-bodies bodies env) (while-loop)]
+                                  [(eval-exp test-exp env k) (eval-bodies bodies env k) (while-loop)]
                                   [else #f]))])
           (while-loop))]
       [letrec-exp (proc-names idss bodies letrec-body)
         (eval-bodies letrec-body (extend-env-recursively proc-names idss bodies env))]
       [set!-exp (var value)
         (let ([info (apply-env-ref env var (lambda (x) x) (lambda () (eopl:error 'set! "You shouldn't see this: ~a" exp)))])
-          (set!-ref info (eval-exp value env)))]
+          (set!-ref info (eval-exp value env k)))]
       [define-exp (var value)
-        (apply-env-ref global-env var (lambda (x) (set!-ref x (eval-exp value global-env)))
+        (apply-env-ref global-env var (lambda (x) (set!-ref x (eval-exp value global-env k)))
                                       (lambda () (set! global-env (extend-env
                                                   (cons var (2nd global-env))
-                                                  (cons (eval-exp value global-env) (map deref (3rd global-env)))
+                                                  (cons (eval-exp value global-env k) (map deref (3rd global-env)))
                                                   (empty-env)))))]
       [else (eopl:error 'eval-exp "Bad abstract syntax: ~a" exp)])))
 
@@ -613,7 +615,7 @@
         
 (define eval-rands
   (lambda (rands env k)
-    (map-cps (lambda (x) (eval-exp x env (get-self-k))) rands k)))
+    (map-cps (lambda (x kon) (eval-exp x env kon)) rands k)))
 ;checkloatsdaskhflashfkj
 
 ;  Apply a procedure to its arguments.
@@ -624,7 +626,7 @@
 	;add a k here
   (lambda (proc-value args k)
     (cases proc-val proc-value
-      [prim-proc (op) (apply-prim-proc op args k)]
+      [prim-proc (op) (apply-prim-proc op (map deref args) k)]
       [closure (vars code env num-of-args)
         (letrec ((new-args-creator
                    (lambda (ls num)
@@ -634,7 +636,7 @@
                              (list ls)
                              (cons (car ls) (new-args-creator (cdr ls) (- num 1))))))))
           (let ([new-env (extend-env vars (new-args-creator args num-of-args) env)])
-            (eval-bodies code new-env)))]
+            (eval-bodies code new-env k)))]
            			; You will add other cases
       [else (eopl:error 'apply-proc
                    "Attempt to apply bad procedure: ~s" 
@@ -714,7 +716,7 @@
       [(display) (display (1st args))];later
       [(newline) (newline)];later
       [(printf) (apply printf args)]
-      [(map) (map-cps (lambda (x) (apply-proc (1st args) (list x))) (cadr args) k)]
+      [(map) (map (lambda (x) (apply-proc (1st args) (list x))) (cadr args))]
       [(apply) (apply (lambda x (apply-proc (1st args) x)) (cadr args))]
       [(caar) (caar (1st args))]
       [(cadr) (cadr (1st args))]
@@ -737,6 +739,8 @@
             prim-op)])))
 
 (define (map-cps proc-cps L k)
+  (pretty-print L)
+  (pretty-print k)
 	(if (null? L)
 		(apply-k k '())
 		(proc-cps (car L) (lambda (x)
